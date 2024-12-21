@@ -42,13 +42,24 @@ app.post('/api/process', async (req, res) => {
         } else {
             screenshotUrl = await puppeteerController.searchWithImage(url);
         }
-        
 
         return res.status(200).json({ success: true, screenshotUrl });
     } catch (error) {
         console.error(`Error processing URL ${url}:`, error);
         return res.status(500).json({ success: false, message: error.message });
     }
+});
+
+// Start screen recording
+app.post('/api/start-recording', (req, res) => {
+    puppeteerController.startScreenRecording();
+    return res.status(200).json({ success: true, message: 'Screen recording started.' });
+});
+
+// Stop screen recording
+app.post('/api/stop-recording', (req, res) => {
+    puppeteerController.stopScreenRecording();
+    return res.status(200).json({ success: true, message: 'Screen recording stopped.' });
 });
 
 app.get('*', (req, res) => {

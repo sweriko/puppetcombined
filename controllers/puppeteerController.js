@@ -3,6 +3,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 
 // For __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -15,18 +16,23 @@ class PuppeteerController {
         this.userDataDir = options.userDataDir;
         this.browser = null;
         this.page = null;
+        this.ffmpegProcess = null;
     }
 
     async init() {
         this.browser = await puppeteer.launch({
             headless: false,
             args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--start-maximized'
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              // Position the window at the top-left corner of the second monitor
+              '--window-position=3440,0',
+              // Match the second monitor resolution
+              '--window-size=1920,1080'
             ],
             userDataDir: this.userDataDir
-        });
+          });
+          
 
         const context = this.browser.defaultBrowserContext();
 
@@ -47,7 +53,7 @@ class PuppeteerController {
         console.log('If not logged in, please manually log in through the opened browser window (which should have appeared).');
 
         try {
-            // Attempt to visit Twitter home to ensure login (not mandatory if you only do image tasks)
+            // Attempt to visit Twitter home to ensure login
             await this.waitForLogin();
             console.log('Twitter login is detected. Ready to process both Twitter and image URLs.');
         } catch (err) {
@@ -77,7 +83,6 @@ class PuppeteerController {
 
         // Wait a bit for the page to stabilize
         await new Promise((resolve) => setTimeout(resolve, 3000));
-
 
         const screenshotsDir = path.join(__dirname, '..', 'screenshots');
         if (!fs.existsSync(screenshotsDir)) {
@@ -139,6 +144,69 @@ class PuppeteerController {
         console.log(`Google Lens screenshot saved: ${screenshotPath}`);
 
         return `/screenshots/${filename}`;
+    }
+
+    /**
+     * Start screen recording using ffmpeg to an rtmp server.
+     */
+    startScreenRecording() {
+        if (this.ffmpegProcess) {
+            console.log('Screen recording is already in progress.');
+            return;
+        }
+
+        // Adjust the `-i` parameter as needed.
+        // For entire desktop on Windows: "-f gdigrab -i desktop"
+        // If you know the exact Chromium window title, you can do something like:
+        // "-f gdigrab -i title=YourPuppeteerWindowTitle"
+        // For now, let's assume entire desktop capture:
+        const ffmpegArgs = [
+            '-f', 'gdigrab',
+            '-framerate', '30',
+            '-offset_x', '3440',
+            '-offset_y', '0',
+            '-video_size', '1920x1080',
+            '-i', 'desktop',
+            '-vcodec', 'libx264',
+            '-preset', 'veryfast',
+            '-tune', 'zerolatency',
+            '-pix_fmt', 'yuv420p',
+            '-f', 'flv',
+            'rtmp://localhost:1935/live/streamkey'
+          ];
+          
+
+        this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs, { stdio: 'pipe' });
+
+        this.ffmpegProcess.on('error', (err) => {
+            console.error('Failed to start ffmpeg:', err);
+            this.ffmpegProcess = null;
+        });
+
+        this.ffmpegProcess.stderr.on('data', (data) => {
+            console.log(`ffmpeg: ${data}`);
+        });
+
+        this.ffmpegProcess.on('close', (code) => {
+            console.log(`ffmpeg exited with code ${code}`);
+            this.ffmpegProcess = null;
+        });
+
+        console.log('Screen recording started.');
+    }
+
+    /**
+     * Stop the ongoing screen recording.
+     */
+    stopScreenRecording() {
+        if (this.ffmpegProcess) {
+            this.ffmpegProcess.stdin.write('q'); // send 'q' to gracefully stop
+            this.ffmpegProcess.kill('SIGINT');
+            this.ffmpegProcess = null;
+            console.log('Screen recording stopped.');
+        } else {
+            console.log('No screen recording is active.');
+        }
     }
 
     async close() {
